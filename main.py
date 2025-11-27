@@ -3,7 +3,7 @@ pygame.init()
 
 from math import sin
 
-#YOU MAY CHANGE THE WIDTH BUT NOT HEIGHT OR WH_RATIO
+# Dimensions - YOU MAY CHANGE THE WIDTH BUT NOT HEIGHT OR WH_RATIO
 WH_RATIO = 5/7
 W = 1500         
 H = int(W * WH_RATIO)
@@ -12,6 +12,13 @@ H = int(W * WH_RATIO)
 FPS = 60
 win = pygame.display.set_mode((W, H))
 pygame.display.set_caption("Interactive blackjack")
+
+# Colours 
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+LIGHT_RED = (255, 100, 100)
+GREEN = (100, 255, 100)
+LIGHT_GREEN = (125, 255, 125)
 
 # Cursor 
 mouse_mask = pygame.mask.Mask((1, 1), True)
@@ -114,20 +121,41 @@ def choose_chips(clock:callable, player_cash:int, file_name:str, mouse_mask:pyga
     # Positioning
     CHIPS_TEXT_FIXED_GAP = H / 3
 
+    def deny_animation(xcor, frame):
+        duration_direction = FPS / 20
+        length = 2
+        add_frames = True
+        
+        if frame < duration_direction:
+            xcor += length
+        elif frame < duration_direction * 2:
+            xcor -= length
+        elif frame < duration_direction * 3:
+            xcor -= length
+        elif frame < duration_direction * 4:
+            xcor += length
+        else:
+            add_frames = False
+
+        return xcor, add_frames
+    
+    insert_animation = False
+    animate_chip = None
+    denial_frame = 0
+
     # Fonts
     text_size = W // 10
     font_path = os.path.abspath(__file__)[:-len(file_name)] + "font\\"
     text_font = pygame.font.Font(f"{font_path}bjfont.ttf", text_size)
     smaller_text_font = text_font = pygame.font.Font(f"{font_path}bjfont.ttf", text_size // 2)
 
-    # Player Cash
-    info_text = text_font.render("Spend your money, pick your chips", True, (255, 255, 255))
-    cash_text = smaller_text_font.render(f"${player_cash}", True, (255, 255, 255))
-
-    cash_text_dimensions = (cash_text.get_width(), cash_text.get_height())
-    text_cors = (W / 2 - cash_text_dimensions[0] / 2, H / 2 - CHIPS_TEXT_FIXED_GAP / 2 - cash_text_dimensions[1] / 2)
-    info_text_dimensions = (info_text.get_width(), info_text.get_height())
-    info_text_cors = (W / 2  - info_text_dimensions[0] / 2, text_cors[1] - H / 10)
+    # Done Button
+    done_text = text_font.render("Done", True, WHITE)
+    done_dimensions = (done_text.get_width(), done_text.get_height())
+    done_cors = (W / 20 * 19 - done_dimensions[0], H / 20 * 19 - done_dimensions[1])
+    overlay_bg_rect_length = 10
+    done_bg_rect = pygame.rect.Rect(done_cors[0] - overlay_bg_rect_length, done_cors[1] - overlay_bg_rect_length, done_dimensions[0] + overlay_bg_rect_length * 2, done_dimensions[1] + overlay_bg_rect_length * 2)
+    done_border_radius = 10
 
     # Chips
     chip_colours = ["red", "green", "blue", "black",  "purple"]
@@ -136,6 +164,7 @@ def choose_chips(clock:callable, player_cash:int, file_name:str, mouse_mask:pyga
     len_chip_types = len(chip_colours)
     chip_dimensions = ( W / len_chip_types * 0.75, W / len_chip_types * 0.75)
     chips = {col : make_image(f"chips\\{col} chip.png", chip_dimensions) for col in chip_colours}
+    chip_surface_values = {surface : value for surface, value in zip(chips.values(), chip_vals)}
     chip_masks = {chip : pygame.mask.from_surface(chip) for chip in chips.values()}
     center_chip_cors = (W / 2, H / 2 + CHIPS_TEXT_FIXED_GAP / 2 - chip_dimensions[1] / 2)
 
@@ -156,23 +185,45 @@ def choose_chips(clock:callable, player_cash:int, file_name:str, mouse_mask:pyga
         )
         for position, chip in enumerate(chips.values())}
     
-    outline_circle_cors = {chip : (cors[0] + chip_dimensions[0] / 2, cors[1] + chip_dimensions[1] / 2) for chip, cors in chips_cors.items()}
-    outline_circle_cols = {chip : (255, 255, 255) for chip in outline_circle_cors.keys()}
+    changing_chip_cors = {chip : [xcor, ycor] for chip, (xcor, ycor) in chips_cors.items()}
+
     OUTLINE_WIDTH = 2
     outline_circle_radius = chip_dimensions[0] / 2 + OUTLINE_WIDTH
 
     # Chip Values to be blitted on top of the chi
-    values_text = [smaller_text_font.render(f"${value}", True, (255, 100, 100)) for value in chip_vals]
+    values_text = [smaller_text_font.render(f"${value}", True, LIGHT_RED) for value in chip_vals]
     values_size = {col: (value.get_width(), value.get_height()) for col, value in zip(chip_values.keys(), values_text)}
     # Very inefficient but works in terms of values_size[x]
     values_cors = [(chip_cors[0] + chip_dimensions[0] / 2 - values_size[col][0] / 2, chip_cors[1] + chip_dimensions[1] / 2 - values_size[col][1] / 2) for chip_cors, col in zip(chips_cors.values(), chip_values.keys())]
     values_blitting = {surface : cors for surface, cors in zip(values_text, values_cors)}
+
+    chips_chosen = {}
 
     while running:
         # General
         clock.tick(FPS)
         frame += 1
         mouse_xcor, mouse_ycor = pygame.mouse.get_pos()
+        left_clicked = False
+
+        # Pygame Events (QUIT AND LEFT_CLICKED)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                # End the Programme Safely
+                running = False
+                return running, {}
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    left_clicked = True
+
+        # Texts and Player Info/Instructions
+        info_text = text_font.render("Spend your money, pick your chips", True, WHITE)
+        cash_text = smaller_text_font.render(f"${player_cash}", True, WHITE)
+
+        cash_text_dimensions = (cash_text.get_width(), cash_text.get_height())
+        text_cors = (W / 2 - cash_text_dimensions[0] / 2, H / 2 - CHIPS_TEXT_FIXED_GAP / 2 - cash_text_dimensions[1] / 2)
+        info_text_dimensions = (info_text.get_width(), info_text.get_height())
+        info_text_cors = (W / 2  - info_text_dimensions[0] / 2, text_cors[1] - H / 10)
 
         # Blitting to Screen
         win.blit(bg, (0,0))
@@ -181,7 +232,10 @@ def choose_chips(clock:callable, player_cash:int, file_name:str, mouse_mask:pyga
         moving_info_ycor = sin(frame * title_jiggle_speed) * title_sine_amplitude + info_text_cors[1]
         win.blit(info_text, (info_text_cors[0], moving_info_ycor))
 
-        for chip, cors in chips_cors.items():
+        outline_circle_cors = {chip : (cors[0] + chip_dimensions[0] / 2, cors[1] + chip_dimensions[1] / 2) for chip, cors in changing_chip_cors.items()}
+        outline_circle_cols = {chip : WHITE if player_cash >= val else LIGHT_RED for chip, val in zip(outline_circle_cors.keys(), chip_vals)}
+
+        for chip, cors in changing_chip_cors.items():
             # Blit the chips with their allocated cors
             win.blit(chip, cors)
 
@@ -190,21 +244,40 @@ def choose_chips(clock:callable, player_cash:int, file_name:str, mouse_mask:pyga
             hovering = mouse_mask.overlap(chip_masks[chip], (hover_offset))
             if hovering:
                 pygame.draw.circle(win, outline_circle_cols[chip], outline_circle_cors[chip], outline_circle_radius, OUTLINE_WIDTH)
+                if left_clicked:
+                    if outline_circle_cols[chip] == LIGHT_RED:
+                        insert_animation = True
+                        animate_chip = chip
+                    elif outline_circle_cols[chip] == WHITE:
+                        player_cash -= chip_surface_values[chip]
+
+        # Animation Logic
+        if insert_animation:
+            changing_chip_cors[animate_chip][0], add_frames = deny_animation(changing_chip_cors[animate_chip][0], denial_frame)
+            if add_frames:
+                denial_frame += 1
+            else:
+                insert_animation = False
+                denial_frame = 0
 
         for chip_text, cors in values_blitting.items():
             # Blit the value of the chips centrally on top of the chip
             win.blit(chip_text, cors)
 
-        pygame.display.flip()
+        # Done Button
+        cursor_rect = pygame.rect.Rect(mouse_xcor, mouse_ycor, 1, 1)
+        if cursor_rect.colliderect(done_bg_rect):
+            pygame.draw.rect(win, LIGHT_GREEN, done_bg_rect, border_radius=done_border_radius)
+            if left_clicked:
+                return running, chips_chosen
+        else:
+            pygame.draw.rect(win, GREEN, done_bg_rect, border_radius=done_border_radius)
+        win.blit(done_text, done_cors)
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                # End the Programme Safely
-                running = False
-                return False
+        pygame.display.flip()
             
 
-def play(clock:pygame.time.Clock, make_image:callable, mouse_mask:pygame.mask.Mask):
+def play(clock:pygame.time.Clock, make_image:callable, mouse_mask:pygame.mask.Mask, chips:dict):
     # General
     running = True
     frame = 0
@@ -263,17 +336,16 @@ def main(make_image:callable, mouse_mask:pygame.mask.Mask, file_name:str):
     # General
     clock = pygame.time.Clock()
     running = load(clock, make_image, mouse_mask)
-    starting_sum = 1000
+    starting_sum = 10
     # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Change this value to change starting sum, $100 by default
 
     if running:
-        running = choose_chips(clock, starting_sum, file_name, mouse_mask)
+        running, chips = choose_chips(clock, starting_sum, file_name, mouse_mask)
 
     while running:
         clock.tick(FPS)
 
-        
-        running = play(clock, make_image, mouse_mask)
+        running = play(clock, make_image, mouse_mask, chips)
 
         pygame.display.flip()
 
